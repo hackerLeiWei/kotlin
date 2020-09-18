@@ -14,14 +14,14 @@ import org.jetbrains.kotlin.fir.declarations.*
 import org.jetbrains.kotlin.fir.expressions.*
 import org.jetbrains.kotlin.fir.expressions.impl.FirNoReceiverExpression
 import org.jetbrains.kotlin.fir.render
-import org.jetbrains.kotlin.fir.resolve.createFunctionalType
-import org.jetbrains.kotlin.fir.resolve.firSymbolProvider
+import org.jetbrains.kotlin.fir.resolve.*
+import org.jetbrains.kotlin.fir.resolve.inference.findInvokeSymbol
 import org.jetbrains.kotlin.fir.resolve.inference.isBuiltinFunctionalType
+import org.jetbrains.kotlin.fir.resolve.inference.isSubtypeOfFunctionalType
 import org.jetbrains.kotlin.fir.resolve.inference.isSuspendFunctionType
 import org.jetbrains.kotlin.fir.resolve.providers.getClassDeclaredCallableSymbols
 import org.jetbrains.kotlin.fir.symbols.impl.ConeClassLikeLookupTagImpl
 import org.jetbrains.kotlin.fir.symbols.impl.FirFunctionSymbol
-import org.jetbrains.kotlin.fir.symbols.impl.FirRegularClassSymbol
 import org.jetbrains.kotlin.fir.types.ConeClassLikeType
 import org.jetbrains.kotlin.fir.types.ConeKotlinType
 import org.jetbrains.kotlin.fir.types.FirTypeRef
@@ -407,7 +407,7 @@ internal class AdapterGenerator(
      *
      * At the use site, instead of the argument, we can put the suspend lambda as an adapter.
      *
-     * Instead of functions, a class with an overridden invoke can be used too:
+     * Instead of functions, a subtype of functional type can be used too:
      * class Foo {
      *   override fun invoke() = ...
      * }
@@ -469,20 +469,17 @@ internal class AdapterGenerator(
                 }
         }
 
-        // Or is a class-like type whose corresponding class is a user-defined and has an overridden `invoke`.
-        if (argumentType is ConeClassLikeType) {
-            val klass =
-                (session.firSymbolProvider.getClassLikeSymbolByFqName(argumentType.lookupTag.classId) as? FirRegularClassSymbol)?.fir
-                    ?: return null
-            if (klass.origin != FirDeclarationOrigin.Source) {
+        // Or is a subtype of functional type, along with user-defined overridden `invoke`.
+        if (argumentType is ConeClassLikeType &&
+            argumentType.isSubtypeOfFunctionalType(session, type.arguments.size)
+        ) {
+            val klass = argumentType.fullyExpandedType(session).lookupTag.toSymbol(session)?.fir as? FirClass<*> ?: return null
+            if (!klass.isFromSource) {
                 return null
             }
-            return klass.declarations
-                .filterIsInstance<FirSimpleFunction>()
-                .singleOrNull { it.name == Name.identifier("invoke") && it.valueParameters.size == type.arguments.size - 1 }
-                ?.let { invokeFunction ->
-                    declarationStorage.getIrFunctionSymbol(invokeFunction.symbol) as? IrSimpleFunctionSymbol
-                }
+            return argumentType.findInvokeSymbol(session, scopeSession, type.arguments.size)?.let {
+                declarationStorage.getIrFunctionSymbol(it) as? IrSimpleFunctionSymbol
+            }
         }
 
         return null

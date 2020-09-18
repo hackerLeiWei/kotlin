@@ -138,6 +138,8 @@ fun FirAnnotatedDeclaration.hasAnnotation(classId: ClassId): Boolean {
     return annotations.any { it.annotationTypeRef.coneTypeSafe<ConeClassLikeType>()?.classId == classId }
 }
 
+inline val FirDeclaration.isFromSource: Boolean
+    get() = origin == FirDeclarationOrigin.Source
 inline val FirDeclaration.isFromLibrary: Boolean
     get() = origin == FirDeclarationOrigin.Library
 inline val FirDeclaration.isSynthetic: Boolean

@@ -8,10 +8,12 @@ package org.jetbrains.kotlin.fir.resolve.inference
 import org.jetbrains.kotlin.builtins.functions.FunctionClassKind
 import org.jetbrains.kotlin.fir.FirSession
 import org.jetbrains.kotlin.fir.declarations.FirAnonymousFunction
-import org.jetbrains.kotlin.fir.resolve.BodyResolveComponents
+import org.jetbrains.kotlin.fir.declarations.FirClass
+import org.jetbrains.kotlin.fir.resolve.*
 import org.jetbrains.kotlin.fir.resolve.calls.Candidate
-import org.jetbrains.kotlin.fir.resolve.fullyExpandedType
+import org.jetbrains.kotlin.fir.symbols.impl.FirFunctionSymbol
 import org.jetbrains.kotlin.fir.types.*
+import org.jetbrains.kotlin.name.Name
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
 
@@ -43,6 +45,30 @@ fun ConeKotlinType.isKFunctionType(session: FirSession): Boolean {
     val kind = functionClassKind(session) ?: return false
     return kind == FunctionClassKind.KFunction ||
             kind == FunctionClassKind.KSuspendFunction
+}
+
+fun ConeClassLikeType.isSubtypeOfFunctionalType(session: FirSession, expectedTypeParameterCount: Int? = null): Boolean {
+    val fullyExpandedType = fullyExpandedType(session)
+    val klass = fullyExpandedType.lookupTag.toSymbol(session)?.fir as? FirClass<*> ?: return false
+    return klass.superTypeRefs.any {
+        val superType = it.coneTypeSafe<ConeKotlinType>()
+        superType?.isBuiltinFunctionalType(session) == true &&
+                (expectedTypeParameterCount == null || superType.typeArguments.size == expectedTypeParameterCount)
+    }
+}
+
+fun ConeClassLikeType.findInvokeSymbol(
+    session: FirSession,
+    scopeSession: ScopeSession,
+    expectedTypeParameterCount: Int
+): FirFunctionSymbol<*>? {
+    var result : FirFunctionSymbol<*>? = null
+    scope(session, scopeSession)?.processFunctionsByName(Name.identifier("invoke")) { functionSymbol ->
+        if (result == null && functionSymbol.fir.valueParameters.size == expectedTypeParameterCount - 1) {
+            result = functionSymbol
+        }
+    }
+    return result
 }
 
 fun ConeKotlinType.receiverType(expectedTypeRef: FirTypeRef?, session: FirSession): ConeKotlinType? {
